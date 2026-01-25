@@ -687,8 +687,8 @@ app.post('/chat/send', (req, res) => {
 
   // If no channelId provided, try to use the first connected channel
   let targetChannel = channelId;
-  if (!targetChannel && joystickClient.connectedChannels) {
-    const channels = Array.from(joystickClient.connectedChannels.keys());
+  if (!targetChannel) {
+    const channels = joystickClient.getConnectedChannels();
     if (channels.length > 0) {
       targetChannel = channels[0];
     } else {
@@ -702,13 +702,10 @@ app.post('/chat/send', (req, res) => {
 
 // Get status
 app.get('/status', (req, res) => {
-  const connectedChannels = joystickClient.connectedChannels ? 
-    Array.from(joystickClient.connectedChannels.keys()) : [];
-  
   res.json({
     joystick: {
       connected: joystickClient.ws?.readyState === WebSocket.OPEN,
-      connectedChannels: connectedChannels,
+      connectedChannels: joystickClient.getConnectedChannels(),
       hasCredentials: !!(config.joystick.clientId && config.joystick.clientSecret)
     },
     streamerbot: {
@@ -900,4 +897,3 @@ process.on('SIGINT', () => {
 
 // Start the application
 start();
-
