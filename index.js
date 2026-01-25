@@ -6,9 +6,12 @@ const path = require('path');
 // Configuration
 const config = {
   joystick: {
-    authToken: process.env.JOYSTICK_AUTH_TOKEN,
+    clientId: process.env.JOYSTICK_CLIENT_ID,
+    clientSecret: process.env.JOYSTICK_CLIENT_SECRET,
     channelId: process.env.JOYSTICK_CHANNEL_ID,
-    wsUrl: 'wss://api.joystick.tv/ws'
+    apiHost: process.env.JOYSTICK_API_HOST || 'https://joystick.tv',
+    // Updated WebSocket URL - may need adjustment based on actual Joystick.TV API
+    wsUrl: process.env.JOYSTICK_WS_URL || 'wss://chat.joystick.tv/ws'
   },
   streamerbot: {
     host: process.env.STREAMERBOT_HOST || 'localhost',
@@ -36,13 +39,63 @@ class JoystickClient {
     this.maxReconnectDelay = 60000;
     this.currentReconnectDelay = this.reconnectDelay;
     this.shouldReconnect = true;
+    this.accessToken = null;
   }
 
-  connect() {
-    const url = `${config.joystick.wsUrl}?channel=${config.joystick.channelId}&token=${config.joystick.authToken}`;
+  async authenticate() {
+    try {
+      logger.info('Authenticating with Joystick.TV...');
+      
+      // OAuth2 client credentials flow
+      const response = await axios.post(`${config.joystick.apiHost}/oauth/token`, {
+        grant_type: 'client_credentials',
+        client_id: config.joystick.clientId,
+        client_secret: config.joystick.clientSecret
+      });
+
+      this.accessToken = response.data.access_token;
+      logger.info('Successfully authenticated with Joystick.TV');
+      return true;
+    } catch (error) {
+      logger.error(`Authentication failed: ${error.message}`);
+      if (error.response) {
+        logger.error(`Server response: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+      }
+      return false;
+    }
+  }
+
+  async connect() {
+    // Validate configuration
+    if (!config.joystick.clientId || !config.joystick.clientSecret || !config.joystick.channelId) {
+      logger.error('Joystick.TV client ID, client secret, and channel ID are required');
+      logger.warn('Skipping Joystick.TV connection. Web UI will still work for testing.');
+      return;
+    }
+
+    // Authenticate first
+    if (!this.accessToken) {
+      const authenticated = await this.authenticate();
+      if (!authenticated) {
+        logger.error('Cannot connect without authentication');
+        this.scheduleReconnect();
+        return;
+      }
+    }
+
+    // Build WebSocket URL with authentication
+    const url = `${config.joystick.wsUrl}?channel=${config.joystick.channelId}&token=${this.accessToken}`;
     
     logger.info('Connecting to Joystick.TV...');
-    this.ws = new WebSocket(url);
+    logger.debug(`WebSocket URL: ${config.joystick.wsUrl}`);
+    
+    try {
+      this.ws = new WebSocket(url);
+    } catch (error) {
+      logger.error(`Failed to create WebSocket: ${error.message}`);
+      this.scheduleReconnect();
+      return;
+    }
 
     this.ws.on('open', () => {
       logger.info('Connected to Joystick.TV');
@@ -60,19 +113,53 @@ class JoystickClient {
 
     this.ws.on('error', (error) => {
       logger.error(`WebSocket error: ${error.message}`);
+      
+      // Provide helpful debugging info
+      if (error.message.includes('Unexpected server response: 200')) {
+        logger.error('');
+        logger.error('═══════════════════════════════════════════════════════════');
+        logger.error('ERROR: WebSocket endpoint is responding with HTTP instead of WebSocket');
+        logger.error('');
+        logger.error('This usually means:');
+        logger.error('1. The WebSocket URL is incorrect');
+        logger.error('2. The API endpoint has changed');
+        logger.error('3. Authentication token is invalid or expired');
+        logger.error('');
+        logger.error('Current WebSocket URL: ' + config.joystick.wsUrl);
+        logger.error('Current API Host: ' + config.joystick.apiHost);
+        logger.error('');
+        logger.error('SOLUTIONS:');
+        logger.error('- Contact Joystick.TV support to get the correct WebSocket endpoint');
+        logger.error('- Check their Discord: https://discord.gg/zKvCf8hrGP');
+        logger.error('- Set JOYSTICK_WS_URL environment variable with the correct endpoint');
+        logger.error('- Verify your client ID and client secret are correct');
+        logger.error('- You can still use the web UI for testing triggers offline');
+        logger.error('═══════════════════════════════════════════════════════════');
+        logger.error('');
+        
+        // Invalidate token and retry
+        this.accessToken = null;
+        this.shouldReconnect = true;
+      }
     });
 
     this.ws.on('close', () => {
       logger.warn('Disconnected from Joystick.TV');
+      // Invalidate token on disconnect
+      this.accessToken = null;
       if (this.shouldReconnect) {
-        logger.info(`Reconnecting in ${this.currentReconnectDelay / 1000}s...`);
-        setTimeout(() => this.connect(), this.currentReconnectDelay);
-        this.currentReconnectDelay = Math.min(
-          this.currentReconnectDelay * 2,
-          this.maxReconnectDelay
-        );
+        this.scheduleReconnect();
       }
     });
+  }
+
+  scheduleReconnect() {
+    logger.info(`Reconnecting in ${this.currentReconnectDelay / 1000}s...`);
+    setTimeout(() => this.connect(), this.currentReconnectDelay);
+    this.currentReconnectDelay = Math.min(
+      this.currentReconnectDelay * 2,
+      this.maxReconnectDelay
+    );
   }
 
   handleMessage(message) {
@@ -544,11 +631,28 @@ const streamerBotClient = new StreamerBotClient();
 
 // Start everything
 function start() {
-  // Validate configuration
-  if (!config.joystick.authToken || !config.joystick.channelId) {
-    logger.error('JOYSTICK_AUTH_TOKEN and JOYSTICK_CHANNEL_ID must be set');
-    process.exit(1);
+  logger.info('═══════════════════════════════════════════════════════════');
+  logger.info('  Joystick.TV to Streamer.bot Bridge');
+  logger.info('═══════════════════════════════════════════════════════════');
+  logger.info('');
+
+  // Validate Joystick.TV configuration
+  if (!config.joystick.clientId || !config.joystick.clientSecret || !config.joystick.channelId) {
+    logger.warn('⚠️  Joystick.TV credentials not configured');
+    logger.warn('   Set JOYSTICK_CLIENT_ID, JOYSTICK_CLIENT_SECRET, and JOYSTICK_CHANNEL_ID');
+    logger.warn('   to enable live connection. The web UI will still work for offline testing');
+    logger.info('');
+  } else {
+    logger.info('✓ Joystick.TV credentials configured');
+    logger.info('  Client ID: ' + config.joystick.clientId);
+    logger.info('  Channel ID: ' + config.joystick.channelId);
   }
+
+  logger.info('✓ Streamer.bot target: ' + config.streamerbot.host + ':' + config.streamerbot.port);
+  logger.info('✓ Web UI will be available on port ' + config.server.port);
+  logger.info('');
+  logger.info('═══════════════════════════════════════════════════════════');
+  logger.info('');
 
   // Connect to services
   joystickClient.connect();
@@ -557,6 +661,8 @@ function start() {
   // Start HTTP server
   app.listen(config.server.port, () => {
     logger.info(`HTTP API server listening on port ${config.server.port}`);
+    logger.info(`Web UI: http://localhost:${config.server.port}`);
+    logger.info('');
   });
 }
 
