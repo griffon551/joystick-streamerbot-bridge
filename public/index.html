@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joystick.TV Bridge - Control Panel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .status-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .status-card h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+
+        .status-dot.connected {
+            background: #10b981;
+            box-shadow: 0 0 8px #10b98180;
+        }
+
+        .status-dot.disconnected {
+            background: #ef4444;
+        }
+
+        .actions-section {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .actions-section h2 {
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .action-list {
+            list-style: none;
+        }
+
+        .action-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+
+        .action-item.found {
+            background: #f0fdf4;
+            border-color: #86efac;
+        }
+
+        .action-item.missing {
+            background: #fef2f2;
+            border-color: #fca5a5;
+        }
+
+        .action-name {
+            font-family: 'Courier New', monospace;
+            font-weight: 500;
+        }
+
+        .action-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .action-badge.found {
+            background: #10b981;
+            color: white;
+        }
+
+        .action-badge.missing {
+            background: #ef4444;
+            color: white;
+        }
+
+        .test-section {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .test-section h2 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .test-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 20px;
+            background: #f9fafb;
+        }
+
+        .test-card h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #666;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            width: 100%;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button.secondary {
+            background: #6b7280;
+        }
+
+        button.secondary:hover {
+            background: #4b5563;
+        }
+
+        .refresh-btn {
+            background: #10b981;
+            padding: 8px 16px;
+            font-size: 13px;
+            width: auto;
+        }
+
+        .refresh-btn:hover {
+            background: #059669;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .alert.success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #6ee7b7;
+        }
+
+        .alert.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+
+        .alert.show {
+            display: block;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-top: 15px;
+        }
+
+        .stat {
+            flex: 1;
+            text-align: center;
+            padding: 15px;
+            background: #f3f4f6;
+            border-radius: 6px;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 Joystick.TV Bridge Control Panel</h1>
+            <p>Test triggers and monitor your Streamer.bot integration</p>
+        </div>
+
+        <div class="status-grid">
+            <div class="status-card">
+                <h3>Joystick.TV</h3>
+                <div class="status-indicator">
+                    <div class="status-dot" id="joystick-status"></div>
+                    <span id="joystick-text">Checking...</span>
+                </div>
+                <small id="joystick-channel"></small>
+            </div>
+
+            <div class="status-card">
+                <h3>Streamer.bot</h3>
+                <div class="status-indicator">
+                    <div class="status-dot" id="streamerbot-status"></div>
+                    <span id="streamerbot-text">Checking...</span>
+                </div>
+                <small id="streamerbot-host"></small>
+            </div>
+
+            <div class="status-card">
+                <h3>Actions Loaded</h3>
+                <div style="font-size: 32px; font-weight: 700; color: #667eea;" id="actions-count">0</div>
+                <small id="last-check">Never checked</small>
+            </div>
+        </div>
+
+        <div class="actions-section">
+            <h2>
+                Required Actions Status
+                <button class="refresh-btn" onclick="refreshActions()">🔄 Refresh</button>
+            </h2>
+            
+            <div id="alert" class="alert"></div>
+            
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-value" id="stat-total">7</div>
+                    <div class="stat-label">Required</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="stat-found">-</div>
+                    <div class="stat-label">Found</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="stat-missing">-</div>
+                    <div class="stat-label">Missing</div>
+                </div>
+            </div>
+
+            <ul class="action-list" id="action-list">
+                <li>Loading...</li>
+            </ul>
+        </div>
+
+        <div class="test-section">
+            <h2>🧪 Test Triggers</h2>
+            <p style="color: #666; margin-bottom: 20px;">Test each trigger without needing a live Joystick.TV connection. Perfect for setting up and debugging your Streamer.bot actions!</p>
+            
+            <div class="test-grid">
+                <!-- Chat Message Test -->
+                <div class="test-card">
+                    <h3>💬 Chat Message</h3>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="chat-user" value="TestUser" placeholder="Username">
+                    </div>
+                    <div class="form-group">
+                        <label>Message</label>
+                        <input type="text" id="chat-message" value="Hello from the test panel!" placeholder="Message">
+                    </div>
+                    <button onclick="testChat()">Test Chat Message</button>
+                </div>
+
+                <!-- Tip Test -->
+                <div class="test-card">
+                    <h3>💰 Tip/Donation</h3>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="tip-user" value="TestUser" placeholder="Username">
+                    </div>
+                    <div class="form-group">
+                        <label>Amount (tokens)</label>
+                        <input type="number" id="tip-amount" value="100" placeholder="Amount">
+                    </div>
+                    <div class="form-group">
+                        <label>Menu Item</label>
+                        <input type="text" id="tip-item" value="Test Reward" placeholder="Reward name">
+                    </div>
+                    <button onclick="testTip()">Test Tip</button>
+                </div>
+
+                <!-- Wheel Spin Test -->
+                <div class="test-card">
+                    <h3>🎡 Wheel Spin</h3>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="wheel-user" value="TestUser" placeholder="Username">
+                    </div>
+                    <div class="form-group">
+                        <label>Amount (tokens)</label>
+                        <input type="number" id="wheel-amount" value="50" placeholder="Amount">
+                    </div>
+                    <div class="form-group">
+                        <label>Prize</label>
+                        <input type="text" id="wheel-prize" value="Grand Prize" placeholder="Prize name">
+                    </div>
+                    <button onclick="testWheel()">Test Wheel Spin</button>
+                </div>
+
+                <!-- Follow Test -->
+                <div class="test-card">
+                    <h3>❤️ New Follow</h3>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="follow-user" value="TestFollower" placeholder="Username">
+                    </div>
+                    <button onclick="testFollow()">Test Follow</button>
+                </div>
+
+                <!-- Subscribe Test -->
+                <div class="test-card">
+                    <h3>⭐ New Subscriber</h3>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="sub-user" value="TestSubscriber" placeholder="Username">
+                    </div>
+                    <div class="form-group">
+                        <label>Tier</label>
+                        <input type="text" id="sub-tier" value="Tier 1" placeholder="Subscription tier">
+                    </div>
+                    <button onclick="testSubscribe()">Test Subscribe</button>
+                </div>
+
+                <!-- Stream Events -->
+                <div class="test-card">
+                    <h3>📡 Stream Events</h3>
+                    <button onclick="testStreamStarted()" style="margin-bottom: 10px;">Test Stream Started</button>
+                    <button onclick="testStreamEnded()" class="secondary">Test Stream Ended</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Update status on load and every 5 seconds
+        updateStatus();
+        checkActions();
+        setInterval(updateStatus, 5000);
+
+        async function updateStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+
+                // Joystick status
+                const joystickDot = document.getElementById('joystick-status');
+                const joystickText = document.getElementById('joystick-text');
+                const joystickChannel = document.getElementById('joystick-channel');
+                
+                if (data.joystick.connected) {
+                    joystickDot.className = 'status-dot connected';
+                    joystickText.textContent = 'Connected';
+                } else {
+                    joystickDot.className = 'status-dot disconnected';
+                    joystickText.textContent = 'Disconnected';
+                }
+                joystickChannel.textContent = `Channel: ${data.joystick.channelId || 'N/A'}`;
+
+                // Streamer.bot status
+                const sbDot = document.getElementById('streamerbot-status');
+                const sbText = document.getElementById('streamerbot-text');
+                const sbHost = document.getElementById('streamerbot-host');
+                
+                if (data.streamerbot.connected) {
+                    sbDot.className = 'status-dot connected';
+                    sbText.textContent = 'Connected';
+                } else {
+                    sbDot.className = 'status-dot disconnected';
+                    sbText.textContent = 'Disconnected';
+                }
+                sbHost.textContent = `${data.streamerbot.host}:${data.streamerbot.port}`;
+
+                // Actions count
+                document.getElementById('actions-count').textContent = data.streamerbot.actionsLoaded;
+                
+                const lastCheck = data.streamerbot.lastActionCheck;
+                if (lastCheck) {
+                    const date = new Date(lastCheck);
+                    document.getElementById('last-check').textContent = `Last checked: ${date.toLocaleTimeString()}`;
+                }
+
+            } catch (error) {
+                console.error('Failed to update status:', error);
+            }
+        }
+
+        async function checkActions() {
+            try {
+                const response = await fetch('/api/actions/check');
+                const data = await response.json();
+
+                document.getElementById('stat-found').textContent = data.found;
+                document.getElementById('stat-missing').textContent = data.missing.length;
+
+                const actionList = document.getElementById('action-list');
+                actionList.innerHTML = '';
+
+                data.required.forEach(actionName => {
+                    const exists = data.existing.includes(actionName);
+                    const li = document.createElement('li');
+                    li.className = `action-item ${exists ? 'found' : 'missing'}`;
+                    li.innerHTML = `
+                        <span class="action-name">${actionName}</span>
+                        <span class="action-badge ${exists ? 'found' : 'missing'}">
+                            ${exists ? '✓ Found' : '✗ Missing'}
+                        </span>
+                    `;
+                    actionList.appendChild(li);
+                });
+
+                if (data.missing.length === 0) {
+                    showAlert('All required actions are configured!', 'success');
+                } else {
+                    showAlert(`${data.missing.length} action(s) missing in Streamer.bot. Please create them.`, 'error');
+                }
+
+            } catch (error) {
+                console.error('Failed to check actions:', error);
+                showAlert('Failed to check actions. Is Streamer.bot connected?', 'error');
+            }
+        }
+
+        async function refreshActions() {
+            try {
+                await fetch('/api/actions/refresh', { method: 'POST' });
+                showAlert('Refreshing action list...', 'success');
+                setTimeout(checkActions, 1000);
+            } catch (error) {
+                showAlert('Failed to refresh actions', 'error');
+            }
+        }
+
+        function showAlert(message, type) {
+            const alert = document.getElementById('alert');
+            alert.textContent = message;
+            alert.className = `alert ${type} show`;
+            setTimeout(() => {
+                alert.className = 'alert';
+            }, 5000);
+        }
+
+        async function testChat() {
+            const user = document.getElementById('chat-user').value;
+            const message = document.getElementById('chat-message').value;
+            
+            try {
+                const response = await fetch('/api/test/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user, message })
+                });
+                
+                if (response.ok) {
+                    showAlert(`✓ Triggered chat message from ${user}`, 'success');
+                }
+            } catch (error) {
+                showAlert('Failed to trigger event', 'error');
+            }
+        }
+
+        async function testTip() {
+            const user = document.getElementById('tip-user').value;
+            const amount = parseInt(document.getElementById('tip-amount').value);
+            const menuItem = document.getElementById('tip-item').value;
+            
+            try {
+                const response = await fetch('/api/test/tip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user, amount, menuItem })
+                });
+                
+                if (response.ok) {
+                    showAlert(`✓ Triggered tip: ${amount} tokens from ${user}`, 'success');
+                }
+            } catch (error) {
+                showAlert('Failed to trigger event', 'error');
+            }
+        }
+
+        async function testWheel() {
+            const user = document.getElementById('wheel-user').value;
+            const amount = parseInt(document.getElementById('wheel-amount').value);
+            const prize = document.getElementById('wheel-prize').value;
+            
+            try {
+                const response = await fetch('/api/test/wheel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user, amount, prize })
+                });
+                
+                if (response.ok) {
+                    showAlert(`✓ Triggered wheel spin: ${user} won ${prize}`, 'success');
+                }
+            } catch (error) {
+                showAlert('Failed to trigger event', 'error');
+            }
+        }
+
+        async function testFollow() {
+            const user = document.getElementById('follow-user').value;
+            
+            try {
+                const response = await fetch('/api/test/follow', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user })
+                });
+                
+                if (response.ok) {
+                    showAlert(`✓ Triggered follow from ${user}`, 'success');
+                }
+            } catch (error) {
+                showAlert('Failed to trigger event', 'error');
+            }
+        }
+
+        async function testSubscribe() {
+            const user = document.getElementById('sub-user').value;
+            const tier = document.getElementById('sub-tier').value;
+            
+            try {
+                const response = await fetch('/api/test/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user, tier })
+                });
+                
+                if (response.ok) {
+                    showAlert(`✓ Triggered subscribe from ${user} (${tier})`, 'success');
+                }
+            } catch (error) {
+                showAlert('Failed to trigger event', 'error');
+            }
+        }
+
+        async function testStreamStarted() {
+            try {
+                const response = await fetch('/api/test/stream-started', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (response.ok) {
+                    showAlert('✓ Triggered stream started event', 'success');
+                }
+            } catch (error) {
+                showAlert('Failed to trigger event', 'error');
+            }
+        }
+
+        async function testStreamEnded() {
+            try {
+                const response = await fetch('/api/test/stream-ended', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (response.ok) {
+                    showAlert('✓ Triggered stream ended event', 'success');
+                }
+            } catch (error) {
+                showAlert('Failed to trigger event', 'error');
+            }
+        }
+    </script>
+</body>
+</html>
