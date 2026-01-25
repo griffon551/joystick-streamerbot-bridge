@@ -542,6 +542,10 @@ class StreamerBotClient {
   }
 }
 
+// Initialize clients
+const joystickClient = new JoystickClient();
+const streamerBotClient = new StreamerBotClient();
+
 // HTTP API Server
 const app = express();
 app.use(express.json());
