@@ -3,11 +3,14 @@ FROM node:18-alpine
 # Set working directory
 WORKDIR /app
 
+# Install wget for healthcheck
+RUN apk add --no-cache wget
+
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies (use npm install instead of npm ci for flexibility)
+RUN npm install --omit=dev
 
 # Copy application code
 COPY index.js ./
