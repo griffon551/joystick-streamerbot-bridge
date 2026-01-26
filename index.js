@@ -557,7 +557,6 @@ class StreamerBotClient {
     this.send(message);
     logger.debug(`Triggered event: ${eventName} with args: ${JSON.stringify(args)}`);
   }
-  }
 
   send(message) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -960,3 +959,4 @@ process.on('SIGINT', () => {
 
 // Start the application
 start();
+
