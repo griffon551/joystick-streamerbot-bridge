@@ -628,13 +628,46 @@ app.get('/oauth/callback', async (req, res) => {
 
     const { access_token, refresh_token, expires_in } = response.data;
     
-    // Get channel info from the token
-    // For now we'll use a placeholder - in production you'd decode the JWT or make an API call
-    const channelId = `channel_${Date.now()}`;
+    // Decode JWT to get user info
+    let channelId = null;
+    try {
+      const tokenParts = access_token.split('.');
+      if (tokenParts.length === 3) {
+        const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
+        channelId = payload.sub || payload.user_id || payload.channel_id;
+        logger.debug(`Decoded token payload: ${JSON.stringify(payload)}`);
+      }
+    } catch (decodeError) {
+      logger.warn(`Could not decode JWT: ${decodeError.message}`);
+    }
+
+    // Fallback: fetch user info from API
+    if (!channelId) {
+      try {
+        const userResponse = await axios.get(`${config.joystick.apiHost}/api/users/stream-settings`, {
+          headers: {
+            'Authorization': `Bearer ${access_token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        channelId = userResponse.data.username || `user_${Date.now()}`;
+        logger.debug(`Got channel ID from API: ${channelId}`);
+      } catch (apiError) {
+        logger.warn(`Could not fetch user info: ${apiError.message}`);
+        channelId = `channel_${Date.now()}`;
+      }
+    }
+    
+    // Check if we already have a token for this channel
+    if (tokenManager.hasToken(channelId)) {
+      logger.info(`Updating existing token for channel: ${channelId}`);
+    } else {
+      logger.info(`New authorization for channel: ${channelId}`);
+    }
     
     tokenManager.setToken(channelId, access_token, refresh_token, expires_in);
     
-    logger.info(`✓ OAuth complete! Received token for channel: ${channelId}`);
+    logger.info(`✓ OAuth complete! Token saved for channel: ${channelId}`);
     
     res.send(`
       <!DOCTYPE html>
@@ -651,7 +684,7 @@ app.get('/oauth/callback', async (req, res) => {
         <div class="success">
           <h1>✓ Authorization Successful!</h1>
           <p>Your Joystick.TV account has been connected.</p>
-          <p>Channel ID: ${channelId}</p>
+          <p>Channel ID: <strong>${channelId}</strong></p>
           <p>You can now close this window and return to the main interface.</p>
         </div>
         <a href="/">← Back to Control Panel</a>
