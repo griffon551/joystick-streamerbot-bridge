@@ -542,10 +542,6 @@ class StreamerBotClient {
   }
 }
 
-// Initialize clients
-const joystickClient = new JoystickClient();
-const streamerBotClient = new StreamerBotClient();
-
 // HTTP API Server
 const app = express();
 app.use(express.json());
@@ -841,7 +837,7 @@ app.post('/api/test/subscribe', (req, res) => {
   res.json({ success: true, event: 'JoystickTV_Subscribe', args });
 });
 
-// Initialize clients
+// Initialize clients (must be after class definitions)
 const joystickClient = new JoystickClient();
 const streamerBotClient = new StreamerBotClient();
 
