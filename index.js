@@ -557,6 +557,179 @@ class StreamerBotClient {
     this.send(message);
     logger.debug(`Triggered event: ${eventName} with args: ${JSON.stringify(args)}`);
   }
+  }class StreamerBotClient {
+  constructor() {
+    this.ws = null;
+    this.reconnectDelay = 5000;
+    this.shouldReconnect = true;
+    this.isConnected = false;
+    this.actions = [];
+    this.lastActionCheck = null;
+  }
+
+  connect() {
+    const url = `ws://${config.streamerbot.host}:${config.streamerbot.port}/`;
+    
+    logger.info('Connecting to Streamer.bot...');
+    this.ws = new WebSocket(url);
+
+    this.ws.on('open', () => {
+      logger.info('Connected to Streamer.bot');
+      this.isConnected = true;
+      
+      // Subscribe to Streamer.bot events if needed
+      this.subscribe();
+    });
+
+    this.ws.on('message', (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        this.handleMessage(message);
+      } catch (error) {
+        logger.error(`Failed to parse Streamer.bot message: ${error.message}`);
+      }
+    });
+
+    this.ws.on('error', (error) => {
+      logger.error(`Streamer.bot WebSocket error: ${error.message}`);
+    });
+
+    this.ws.on('close', () => {
+      logger.warn('Disconnected from Streamer.bot');
+      this.isConnected = false;
+      if (this.shouldReconnect) {
+        logger.info(`Reconnecting to Streamer.bot in ${this.reconnectDelay / 1000}s...`);
+        setTimeout(() => this.connect(), this.reconnectDelay);
+      }
+    });
+  }
+
+  subscribe() {
+    // Subscribe to events from Streamer.bot if needed
+    const subscribeMessage = {
+      request: 'Subscribe',
+      id: 'joystick-integration',
+      events: {
+        General: ['Custom']
+      }
+    };
+    
+    this.send(subscribeMessage);
+    
+    // Request list of actions
+    this.getActions();
+    
+    // Try to authenticate (some Streamer.bot setups require this)
+    // Using empty credentials for local connections
+    setTimeout(() => {
+      const authMessage = {
+        request: 'Authenticate',
+        id: 'auth-' + Date.now()
+      };
+      this.send(authMessage);
+      logger.debug('Sent authentication request to Streamer.bot');
+    }, 500);
+  }
+
+  getActions() {
+    const message = {
+      request: 'GetActions',
+      id: 'get-actions-' + Date.now()
+    };
+    
+    this.send(message);
+    logger.debug('Requested action list from Streamer.bot');
+  }
+
+  checkRequiredActions() {
+    const requiredActions = [
+      'JoystickTV_ChatMessage',
+      'JoystickTV_Tip',
+      'JoystickTV_WheelSpin',
+      'JoystickTV_Follow',
+      'JoystickTV_StreamStarted',
+      'JoystickTV_StreamEnded',
+      'JoystickTV_Subscribe'
+    ];
+
+    const missingActions = requiredActions.filter(
+      actionName => !this.actions.some(a => a.name === actionName)
+    );
+
+    const existingActions = requiredActions.filter(
+      actionName => this.actions.some(a => a.name === actionName)
+    );
+
+    return {
+      required: requiredActions,
+      existing: existingActions,
+      missing: missingActions,
+      total: requiredActions.length,
+      found: existingActions.length
+    };
+  }
+
+  handleMessage(message) {
+    logger.debug(`Received from Streamer.bot: ${JSON.stringify(message)}`);
+    
+    // Handle action list response
+    if (message.id && message.id.startsWith('get-actions-') && message.actions) {
+      this.actions = message.actions;
+      this.lastActionCheck = new Date();
+      logger.info(`Loaded ${this.actions.length} actions from Streamer.bot`);
+      
+      const check = this.checkRequiredActions();
+      if (check.missing.length > 0) {
+        logger.warn(`Missing ${check.missing.length} required actions: ${check.missing.join(', ')}`);
+      } else {
+        logger.info('All required actions are configured in Streamer.bot');
+      }
+    }
+    
+    // Handle authentication response
+    if (message.id && message.id.startsWith('auth-')) {
+      if (message.status === 'ok') {
+        logger.info('✓ Authenticated with Streamer.bot');
+      } else {
+        logger.warn('Authentication response:', message);
+      }
+    }
+    
+    // Handle DoAction response
+    if (message.id && message.id.startsWith('trigger-')) {
+      if (message.status === 'ok') {
+        logger.debug(`Action executed successfully: ${message.id}`);
+      } else {
+        logger.error(`Action execution failed: ${JSON.stringify(message)}`);
+      }
+    }
+    
+    // Handle responses from Streamer.bot
+    if (message.event?.type === 'Custom' && message.data?.name === 'JoystickTV_SendMessage') {
+      const chatMessage = message.data.message;
+      if (chatMessage) {
+        joystickClient.sendChatMessage(chatMessage);
+      }
+    }
+  }
+
+  triggerEvent(eventName, args) {
+    if (!this.isConnected) {
+      logger.warn(`Cannot trigger event ${eventName}: Not connected to Streamer.bot`);
+      return;
+    }
+
+    const message = {
+      request: 'DoAction',
+      action: {
+        name: eventName
+      },
+      args: args,
+      id: `trigger-${Date.now()}`
+    };
+
+    this.send(message);
+    logger.debug(`Triggered event: ${eventName} with args: ${JSON.stringify(args)}`);
   }
 
   send(message) {
@@ -566,6 +739,28 @@ class StreamerBotClient {
   }
 
   disconnect() {
+    this.shouldReconnect = false;
+    if (this.ws) {
+      this.ws.close();
+    }
+  }
+}
+
+// HTTP API Server
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    joystick: joystickClient.ws?.readyState === WebSocket.OPEN,
+    streamerbot: streamerBotClient.isConnected,
+    uptime: process.uptime()
+  });
+});
+disconnect() {
     this.shouldReconnect = false;
     if (this.ws) {
       this.ws.close();
@@ -960,3 +1155,4 @@ process.on('SIGINT', () => {
 
 // Start the application
 start();
+
