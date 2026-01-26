@@ -444,6 +444,17 @@ class StreamerBotClient {
     
     // Request list of actions
     this.getActions();
+    
+    // Try to authenticate (some Streamer.bot setups require this)
+    // Using empty credentials for local connections
+    setTimeout(() => {
+      const authMessage = {
+        request: 'Authenticate',
+        id: 'auth-' + Date.now()
+      };
+      this.send(authMessage);
+      logger.debug('Sent authentication request to Streamer.bot');
+    }, 500);
   }
 
   getActions() {
@@ -501,6 +512,24 @@ class StreamerBotClient {
       }
     }
     
+    // Handle authentication response
+    if (message.id && message.id.startsWith('auth-')) {
+      if (message.status === 'ok') {
+        logger.info('✓ Authenticated with Streamer.bot');
+      } else {
+        logger.warn('Authentication response:', message);
+      }
+    }
+    
+    // Handle DoAction response
+    if (message.id && message.id.startsWith('trigger-')) {
+      if (message.status === 'ok') {
+        logger.debug(`Action executed successfully: ${message.id}`);
+      } else {
+        logger.error(`Action execution failed: ${JSON.stringify(message)}`);
+      }
+    }
+    
     // Handle responses from Streamer.bot
     if (message.event?.type === 'Custom' && message.data?.name === 'JoystickTV_SendMessage') {
       const chatMessage = message.data.message;
@@ -521,11 +550,13 @@ class StreamerBotClient {
       action: {
         name: eventName
       },
-      args: args
+      args: args,
+      id: `trigger-${Date.now()}`
     };
 
     this.send(message);
-    logger.debug(`Triggered event: ${eventName}`);
+    logger.debug(`Triggered event: ${eventName} with args: ${JSON.stringify(args)}`);
+  }
   }
 
   send(message) {
