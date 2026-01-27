@@ -436,6 +436,34 @@
                     <button onclick="testSubscribe()">Test Subscribe</button>
                 </div>
 
+                <!-- Gifted Subs Test -->
+                <div class="test-card">
+                    <h3>🎁 Gifted Subscriptions</h3>
+                    <div class="form-group">
+                        <label>Gifter Username</label>
+                        <input type="text" id="gift-user" value="TestGifter" placeholder="Username">
+                    </div>
+                    <div class="form-group">
+                        <label>Number of Subs</label>
+                        <input type="number" id="gift-count" value="5" placeholder="Gift count">
+                    </div>
+                    <button onclick="testGiftedSubs()">Test Gifted Subs</button>
+                </div>
+
+                <!-- Drop In Test -->
+                <div class="test-card">
+                    <h3>👋 Stream Drop-In</h3>
+                    <div class="form-group">
+                        <label>Streamer Name</label>
+                        <input type="text" id="dropin-streamer" value="TestStreamer" placeholder="Streamer">
+                    </div>
+                    <div class="form-group">
+                        <label>Viewers Brought</label>
+                        <input type="number" id="dropin-viewers" value="25" placeholder="Viewer count">
+                    </div>
+                    <button onclick="testDropIn()">Test Drop-In</button>
+                </div>
+
                 <!-- Stream Events -->
                 <div class="test-card">
                     <h3>📡 Stream Events</h3>
@@ -504,6 +532,7 @@
                 const response = await fetch('/api/actions/check');
                 const data = await response.json();
 
+                document.getElementById('stat-total').textContent = data.total;
                 document.getElementById('stat-found').textContent = data.found;
                 document.getElementById('stat-missing').textContent = data.missing.length;
 
@@ -679,6 +708,45 @@
                 showAlert('Failed to trigger event', 'error');
             }
         }
+
+        async function testGiftedSubs() {
+            const user = document.getElementById('gift-user').value;
+            const giftCount = parseInt(document.getElementById('gift-count').value);
+            
+            try {
+                const response = await fetch('/api/test/gifted-subs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user, giftCount })
+                });
+                
+                if (response.ok) {
+                    showAlert(`✓ Triggered gifted subs: ${user} gifted ${giftCount} subs`, 'success');
+                }
+            } catch (error) {
+                showAlert('Failed to trigger event', 'error');
+            }
+        }
+
+        async function testDropIn() {
+            const streamer = document.getElementById('dropin-streamer').value;
+            const viewers = parseInt(document.getElementById('dropin-viewers').value);
+            
+            try {
+                const response = await fetch('/api/test/drop-in', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ streamer, viewers })
+                });
+                
+                if (response.ok) {
+                    showAlert(`✓ Triggered drop-in: ${streamer} brought ${viewers} viewers`, 'success');
+                }
+            } catch (error) {
+                showAlert('Failed to trigger event', 'error');
+            }
+        }
     </script>
 </body>
 </html>
+
