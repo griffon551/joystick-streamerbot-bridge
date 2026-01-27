@@ -133,14 +133,12 @@ class JoystickClient {
   }
 
   async connect() {
-    // Validate configuration
     if (!config.joystick.clientId || !config.joystick.clientSecret) {
       logger.warn('Joystick.TV credentials not configured');
       logger.warn('Visit http://localhost:3000/setup to complete OAuth setup');
       return;
     }
 
-    // Build WebSocket URL with Basic Auth
     const basicAuth = Buffer.from(`${config.joystick.clientId}:${config.joystick.clientSecret}`).toString('base64');
     const url = `${config.joystick.wsUrl}?token=${basicAuth}`;
     
@@ -159,7 +157,6 @@ class JoystickClient {
       logger.info('WebSocket connected to Joystick.TV');
       this.currentReconnectDelay = this.reconnectDelay;
       
-      // Subscribe to GatewayChannel
       const subscribeMessage = {
         command: 'subscribe',
         identifier: JSON.stringify({
@@ -196,24 +193,13 @@ class JoystickClient {
     });
   }
 
-  scheduleReconnect() {
-    logger.info(`Reconnecting in ${this.currentReconnectDelay / 1000}s...`);
-    setTimeout(() => this.connect(), this.currentReconnectDelay);
-    this.currentReconnectDelay = Math.min(
-      this.currentReconnectDelay * 2,
-      this.maxReconnectDelay
-    );
-  }
-
   handleMessage(message) {
-    // Action Cable protocol messages
     if (message.type === 'welcome') {
       logger.info('✓ Received welcome from Joystick.TV');
       return;
     }
 
     if (message.type === 'ping') {
-      // Connection keepalive - no action needed
       return;
     }
 
@@ -228,21 +214,17 @@ class JoystickClient {
       return;
     }
 
-    // Handle actual message data
     if (message.message) {
       const data = message.message;
       const channelId = data.channelId;
       
-      // Track which channels we're receiving events from
       if (channelId && !this.connectedChannels.has(channelId)) {
         this.connectedChannels.set(channelId, true);
         logger.info(`Now receiving events from channel: ${channelId}`);
       }
 
       const event = data.event;
-      const type = data.type;
 
-      // Route based on event type
       if (event === 'ChatMessage') {
         this.handleChatMessage(data);
       } else if (event === 'StreamEvent') {
@@ -336,11 +318,29 @@ class JoystickClient {
           const subArgs = {
             user: metadata.who || 'Unknown',
             tier: metadata.tier || '',
+            giftCount: metadata.count || 1,
             channelId: data.channelId,
             platform: 'joystick'
           };
-          logger.info(`New subscriber: ${subArgs.user}`);
-          streamerBotClient.triggerEvent('JoystickTV_Subscribe', subArgs);
+          
+          if (type === 'GiftedSubscriptions') {
+            logger.info(`${subArgs.user} gifted ${subArgs.giftCount} subscription(s)`);
+            streamerBotClient.triggerEvent('JoystickTV_GiftedSubs', subArgs);
+          } else {
+            logger.info(`New subscriber: ${subArgs.user}`);
+            streamerBotClient.triggerEvent('JoystickTV_Subscribe', subArgs);
+          }
+          break;
+
+        case 'StreamDroppedIn':
+          const dropInArgs = {
+            streamer: metadata.who || 'Unknown',
+            viewers: metadata.viewer_count || metadata.viewers || 0,
+            channelId: data.channelId,
+            platform: 'joystick'
+          };
+          logger.info(`${dropInArgs.streamer} dropped in with ${dropInArgs.viewers} viewers`);
+          streamerBotClient.triggerEvent('JoystickTV_DropIn', dropInArgs);
           break;
 
         default:
@@ -355,23 +355,55 @@ class JoystickClient {
   handleUserPresence(data) {
     const type = data.type;
     logger.debug(`User ${type}: ${data.text}`);
-    // Could add triggers for user enter/leave if needed
   }
 
-  sendChatMessage(message) {
+  sendChatMessage(message, channelId) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       logger.error('Cannot send message: Not connected');
       return false;
     }
 
+    if (!channelId) {
+      logger.error('Cannot send message: No channelId specified');
+      return false;
+    }
+
+    // Action Cable message format for sending messages
     const payload = {
-      type: 'chat',
-      data: { message }
+      command: 'message',
+      identifier: JSON.stringify({
+        channel: 'GatewayChannel'
+      }),
+      data: JSON.stringify({
+        action: 'send_message',
+        text: message,
+        channelId: channelId
+      })
     };
 
-    this.ws.send(JSON.stringify(payload));
-    logger.debug(`Sent chat message: ${message}`);
-    return true;
+    logger.debug(`Sending chat message payload: ${JSON.stringify(payload)}`);
+    
+    try {
+      this.ws.send(JSON.stringify(payload));
+      logger.info(`Sent chat message to ${channelId}: ${message}`);
+      return true;
+    } catch (error) {
+      logger.error(`Error sending message: ${error.message}`);
+      return false;
+    }
+  }
+
+  scheduleReconnect() {
+    logger.info(`Reconnecting in ${this.currentReconnectDelay / 1000}s...`);
+    setTimeout(() => this.connect(), this.currentReconnectDelay);
+    this.currentReconnectDelay = Math.min(
+      this.currentReconnectDelay * 2,
+      this.maxReconnectDelay
+    );
+  }
+
+  getConnectedChannels() {
+    return Array.from(this.connectedChannels.keys());
   }
 
   disconnect() {
@@ -402,8 +434,6 @@ class StreamerBotClient {
     this.ws.on('open', () => {
       logger.info('Connected to Streamer.bot');
       this.isConnected = true;
-      
-      // Subscribe to Streamer.bot events if needed
       this.subscribe();
     });
 
@@ -431,7 +461,6 @@ class StreamerBotClient {
   }
 
   subscribe() {
-    // Subscribe to events from Streamer.bot if needed
     const subscribeMessage = {
       request: 'Subscribe',
       id: 'joystick-integration',
@@ -441,12 +470,8 @@ class StreamerBotClient {
     };
     
     this.send(subscribeMessage);
-    
-    // Request list of actions
     this.getActions();
     
-    // Try to authenticate (some Streamer.bot setups require this)
-    // Using empty credentials for local connections
     setTimeout(() => {
       const authMessage = {
         request: 'Authenticate',
@@ -475,7 +500,9 @@ class StreamerBotClient {
       'JoystickTV_Follow',
       'JoystickTV_StreamStarted',
       'JoystickTV_StreamEnded',
-      'JoystickTV_Subscribe'
+      'JoystickTV_Subscribe',
+      'JoystickTV_GiftedSubs',
+      'JoystickTV_DropIn'
     ];
 
     const missingActions = requiredActions.filter(
@@ -498,7 +525,6 @@ class StreamerBotClient {
   handleMessage(message) {
     logger.debug(`Received from Streamer.bot: ${JSON.stringify(message)}`);
     
-    // Handle action list response
     if (message.id && message.id.startsWith('get-actions-') && message.actions) {
       this.actions = message.actions;
       this.lastActionCheck = new Date();
@@ -512,25 +538,22 @@ class StreamerBotClient {
       }
     }
     
-    // Handle authentication response
     if (message.id && message.id.startsWith('auth-')) {
       if (message.status === 'ok') {
         logger.info('✓ Authenticated with Streamer.bot');
       } else {
-        logger.warn('Authentication response:', message);
+        logger.warn('Authentication response: ' + JSON.stringify(message));
       }
     }
     
-    // Handle DoAction response
     if (message.id && message.id.startsWith('trigger-')) {
       if (message.status === 'ok') {
-        logger.debug(`Action executed successfully: ${message.id}`);
+        logger.debug(`✓ Action executed successfully: ${message.id}`);
       } else {
-        logger.error(`Action execution failed: ${JSON.stringify(message)}`);
+        logger.error(`✗ Action execution failed: ${JSON.stringify(message)}`);
       }
     }
     
-    // Handle responses from Streamer.bot
     if (message.event?.type === 'Custom' && message.data?.name === 'JoystickTV_SendMessage') {
       const chatMessage = message.data.message;
       if (chatMessage) {
@@ -572,12 +595,15 @@ class StreamerBotClient {
   }
 }
 
+// Initialize clients
+const joystickClient = new JoystickClient();
+const streamerBotClient = new StreamerBotClient();
+
 // HTTP API Server
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -587,7 +613,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-// OAuth setup page
 app.get('/setup', (req, res) => {
   const authUrl = `${config.joystick.apiHost}/api/oauth/authorize?response_type=code&client_id=${config.joystick.clientId}&scope=bot&state=${Date.now()}`;
   
@@ -601,7 +626,6 @@ app.get('/setup', (req, res) => {
         .btn { display: inline-block; padding: 15px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; font-size: 18px; }
         .btn:hover { background: #5568d3; }
         pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
-        .success { background: #d1fae5; border: 1px solid #6ee7b7; padding: 15px; border-radius: 5px; margin: 20px 0; }
       </style>
     </head>
     <body>
@@ -632,16 +656,14 @@ Redirect URI: ${config.joystick.redirectUri}</pre>
   `);
 });
 
-// OAuth callback endpoint
 app.get('/oauth/callback', async (req, res) => {
-  const { code, state } = req.query;
+  const { code } = req.query;
 
   if (!code) {
     return res.status(400).send('Missing authorization code');
   }
 
   try {
-    // Exchange authorization code for access token
     const basicAuth = Buffer.from(`${config.joystick.clientId}:${config.joystick.clientSecret}`).toString('base64');
     
     const response = await axios.post(
@@ -658,7 +680,6 @@ app.get('/oauth/callback', async (req, res) => {
 
     const { access_token, refresh_token, expires_in } = response.data;
     
-    // Decode JWT to get user info
     let channelId = null;
     try {
       const tokenParts = access_token.split('.');
@@ -671,7 +692,6 @@ app.get('/oauth/callback', async (req, res) => {
       logger.warn(`Could not decode JWT: ${decodeError.message}`);
     }
 
-    // Fallback: fetch user info from API
     if (!channelId) {
       try {
         const userResponse = await axios.get(`${config.joystick.apiHost}/api/users/stream-settings`, {
@@ -688,7 +708,6 @@ app.get('/oauth/callback', async (req, res) => {
       }
     }
     
-    // Check if we already have a token for this channel
     if (tokenManager.hasToken(channelId)) {
       logger.info(`Updating existing token for channel: ${channelId}`);
     } else {
@@ -722,7 +741,6 @@ app.get('/oauth/callback', async (req, res) => {
       </html>
     `);
 
-    // Reconnect to pick up the new token
     if (!joystickClient.ws || joystickClient.ws.readyState !== WebSocket.OPEN) {
       setTimeout(() => joystickClient.connect(), 1000);
     }
@@ -736,7 +754,6 @@ app.get('/oauth/callback', async (req, res) => {
   }
 });
 
-// Send chat message endpoint
 app.post('/chat/send', (req, res) => {
   const { message, channelId } = req.body;
   
@@ -744,14 +761,13 @@ app.post('/chat/send', (req, res) => {
     return res.status(400).json({ error: 'Message is required' });
   }
 
-  // If no channelId provided, try to use the first connected channel
   let targetChannel = channelId;
   if (!targetChannel && joystickClient.connectedChannels) {
     const channels = Array.from(joystickClient.connectedChannels.keys());
     if (channels.length > 0) {
       targetChannel = channels[0];
     } else {
-      return res.status(400).json({ error: 'No connected channels. Specify channelId or complete OAuth setup.' });
+      return res.status(400).json({ error: 'No connected channels' });
     }
   }
 
@@ -759,7 +775,6 @@ app.post('/chat/send', (req, res) => {
   res.json({ success, channelId: targetChannel });
 });
 
-// Get status
 app.get('/status', (req, res) => {
   const connectedChannels = joystickClient.connectedChannels ? 
     Array.from(joystickClient.connectedChannels.keys()) : [];
@@ -780,7 +795,6 @@ app.get('/status', (req, res) => {
   });
 });
 
-// Get action check status
 app.get('/api/actions/check', (req, res) => {
   if (!streamerBotClient.isConnected) {
     return res.status(503).json({ error: 'Not connected to Streamer.bot' });
@@ -790,7 +804,6 @@ app.get('/api/actions/check', (req, res) => {
   res.json(check);
 });
 
-// Refresh action list
 app.post('/api/actions/refresh', (req, res) => {
   if (!streamerBotClient.isConnected) {
     return res.status(503).json({ error: 'Not connected to Streamer.bot' });
@@ -800,7 +813,6 @@ app.post('/api/actions/refresh', (req, res) => {
   res.json({ success: true, message: 'Action refresh requested' });
 });
 
-// Test trigger endpoints
 app.post('/api/test/chat', (req, res) => {
   const { user, message } = req.body;
   
@@ -892,6 +904,7 @@ app.post('/api/test/subscribe', (req, res) => {
     user: user || 'TestUser',
     userId: 'test_123',
     tier: tier || 'Tier 1',
+    giftCount: 1,
     platform: 'joystick_test'
   };
   
@@ -900,18 +913,42 @@ app.post('/api/test/subscribe', (req, res) => {
   res.json({ success: true, event: 'JoystickTV_Subscribe', args });
 });
 
-// Initialize clients (must be after class definitions)
-const joystickClient = new JoystickClient();
-const streamerBotClient = new StreamerBotClient();
+app.post('/api/test/gifted-subs', (req, res) => {
+  const { user, giftCount } = req.body;
+  
+  const args = {
+    user: user || 'TestGifter',
+    userId: 'test_123',
+    tier: 'Tier 1',
+    giftCount: giftCount || 5,
+    platform: 'joystick_test'
+  };
+  
+  streamerBotClient.triggerEvent('JoystickTV_GiftedSubs', args);
+  logger.info(`Test trigger: ${args.user} gifted ${args.giftCount} subs`);
+  res.json({ success: true, event: 'JoystickTV_GiftedSubs', args });
+});
 
-// Start everything
+app.post('/api/test/drop-in', (req, res) => {
+  const { streamer, viewers } = req.body;
+  
+  const args = {
+    streamer: streamer || 'TestStreamer',
+    viewers: viewers || 25,
+    platform: 'joystick_test'
+  };
+  
+  streamerBotClient.triggerEvent('JoystickTV_DropIn', args);
+  logger.info(`Test trigger: ${args.streamer} dropped in with ${args.viewers} viewers`);
+  res.json({ success: true, event: 'JoystickTV_DropIn', args });
+});
+
 function start() {
   logger.info('═══════════════════════════════════════════════════════════');
   logger.info('  Joystick.TV to Streamer.bot Bridge');
   logger.info('═══════════════════════════════════════════════════════════');
   logger.info('');
 
-  // Validate Joystick.TV configuration
   if (!config.joystick.clientId || !config.joystick.clientSecret) {
     logger.warn('⚠️  Joystick.TV credentials not configured');
     logger.warn('   Set JOYSTICK_CLIENT_ID and JOYSTICK_CLIENT_SECRET');
@@ -929,11 +966,9 @@ function start() {
   logger.info('═══════════════════════════════════════════════════════════');
   logger.info('');
 
-  // Connect to services
   joystickClient.connect();
   streamerBotClient.connect();
 
-  // Start HTTP server
   app.listen(config.server.port, () => {
     logger.info(`HTTP API server listening on port ${config.server.port}`);
     logger.info(`Web UI: http://localhost:${config.server.port}`);
@@ -942,7 +977,6 @@ function start() {
   });
 }
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received, shutting down gracefully...');
   joystickClient.disconnect();
@@ -957,7 +991,5 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-// Start the application
 start();
-
 
