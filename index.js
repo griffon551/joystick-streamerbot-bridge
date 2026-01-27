@@ -358,40 +358,20 @@ class JoystickClient {
     // Could add triggers for user enter/leave if needed
   }
 
-  sendChatMessage(message, channelId) {
+  sendChatMessage(message) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       logger.error('Cannot send message: Not connected');
       return false;
     }
 
-    if (!channelId) {
-      logger.error('Cannot send message: No channelId specified');
-      return false;
-    }
-
-    // Action Cable message format based on Joystick.TV documentation
     const payload = {
-      command: 'message',
-      identifier: JSON.stringify({
-        channel: 'GatewayChannel'
-      }),
-      data: JSON.stringify({
-        action: 'send_message',
-        text: message,
-        channelId: channelId
-      })
+      type: 'chat',
+      data: { message }
     };
 
-    logger.debug(`Sending chat message payload: ${JSON.stringify(payload)}`);
-    
-    try {
-      this.ws.send(JSON.stringify(payload));
-      logger.info(`Sent chat message to ${channelId}: ${message}`);
-      return true;
-    } catch (error) {
-      logger.error(`Error sending message: ${error.message}`);
-      return false;
-    }
+    this.ws.send(JSON.stringify(payload));
+    logger.debug(`Sent chat message: ${message}`);
+    return true;
   }
 
   disconnect() {
