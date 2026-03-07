@@ -1,0 +1,37 @@
+services:
+  joystick-streamerbot-bridge:
+    build:
+      context: https://github.com/griffon551/joystick-streamerbot-bridge.git#main
+      dockerfile: Dockerfile
+    container_name: joystick-streamerbot-bridge
+    restart: unless-stopped
+    ports:
+      - 3000:3000 #if port 3000 is in use on the pc you are installing this on, change the first one to an open port. ex [3000:3000 -> 4000:3000] This is the port you use to access the test panel and authenticate with joystick.
+    environment:
+      # Joystick.TV Configuration
+      - JOYSTICK_CLIENT_ID=''
+      - JOYSTICK_CLIENT_SECRET=''
+      - JOYSTICK_REDIRECT_URI=http://[lan ip of machine running this integration]:3000/oauth/callback
+      # Streamer.bot Configuration
+      - STREAMERBOT_HOST='' #ip of the machine streamer.bot runs on
+      - STREAMERBOT_PORT=8080
+      # Server Configuration
+      - SERVER_PORT=3000 #if port is in use, change the port above under "ports" section
+      - LOG_LEVEL=data
+      # Node Environment
+      - NODE_ENV=production
+    volumes:
+      - /mnt/Drive/configs/joystickintegration/data:/data #change as needed [system drive location for data folder:dont change]
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --quiet
+        - --tries=1
+        - --spider
+        - http://localhost:3000/health
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+networks: {}
