@@ -335,7 +335,7 @@ class JoystickClient {
         case 'StreamDroppedIn':
           const dropInArgs = {
             streamer: metadata.who || 'Unknown',
-            viewers: metadata.viewer_count || metadata.viewers || 0,
+            viewers: metadata.number_of_viewers || metadata.viewer_count || metadata.viewers || 0,
             channelId: data.channelId,
             platform: 'joystick'
           };
