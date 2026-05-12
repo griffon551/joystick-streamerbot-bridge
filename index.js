@@ -11,7 +11,7 @@ const config = {
     clientSecret: process.env.JOYSTICK_CLIENT_SECRET,
     redirectUri: process.env.JOYSTICK_REDIRECT_URI || 'http://localhost:3000/oauth/callback',
     apiHost: process.env.JOYSTICK_API_HOST || 'https://joystick.tv',
-    wsUrl: process.env.JOYSTICK_WS_URL || 'wss://joystick.tv/cable'
+    wsUrl: process.env.JOYSTICK_WS_URL || 'wss://api.joystick.tv/cable'
   },
   streamerbot: {
     host: process.env.STREAMERBOT_HOST || 'localhost',
