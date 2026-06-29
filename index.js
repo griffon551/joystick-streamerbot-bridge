@@ -343,6 +343,48 @@ class JoystickClient {
           streamerBotClient.triggerEvent('JoystickTV_DropIn', dropInArgs);
           break;
 
+        case 'StreamResuming':
+          const resumingArgs = {
+            timestamp: data.createdAt,
+            channelId: data.channelId,
+            platform: 'joystick'
+          };
+          logger.info('Stream resuming soon');
+          streamerBotClient.triggerEvent('JoystickTV_StreamResuming', resumingArgs);
+          break;
+
+        case 'DeviceConnected':
+          const deviceArgs = {
+            timestamp: data.createdAt,
+            channelId: data.channelId,
+            platform: 'joystick'
+          };
+          logger.info('Device connected');
+          streamerBotClient.triggerEvent('JoystickTV_DeviceConnected', deviceArgs);
+          break;
+
+        case 'TipGoalMet':
+          const tipGoalArgs = {
+            user: metadata.who || 'Unknown',
+            amount: metadata.how_much || 0,
+            goalName: metadata.goal_name || metadata.tip_menu_item || '',
+            channelId: data.channelId,
+            platform: 'joystick'
+          };
+          logger.info(`Tip goal met! Raw metadata: ${JSON.stringify(metadata)}`);
+          streamerBotClient.triggerEvent('JoystickTV_TipGoalMet', tipGoalArgs);
+          break;
+
+        case 'SubscriberOnlyStarted':
+          const subOnlyArgs = {
+            channelId: data.channelId,
+            timestamp: data.createdAt,
+            platform: 'joystick'
+          };
+          logger.info(`Subscriber only mode started. Raw metadata: ${JSON.stringify(metadata)}`);
+          streamerBotClient.triggerEvent('JoystickTV_SubscriberOnlyStarted', subOnlyArgs);
+          break;
+
         default:
           logger.debug(`Unhandled stream event type: ${type}`);
           logger.debug(`Data: ${JSON.stringify(data)}`);
@@ -354,7 +396,21 @@ class JoystickClient {
 
   handleUserPresence(data) {
     const type = data.type;
-    logger.debug(`User ${type}: ${data.text}`);
+    const args = {
+      user: data.text || 'Unknown',
+      channelId: data.channelId,
+      platform: 'joystick'
+    };
+
+    if (type === 'enter_stream') {
+      logger.debug(`User entered: ${data.text}`);
+      streamerBotClient.triggerEvent('JoystickTV_UserEntered', args);
+    } else if (type === 'leave_stream') {
+      logger.debug(`User left: ${data.text}`);
+      streamerBotClient.triggerEvent('JoystickTV_UserLeft', args);
+    } else {
+      logger.debug(`Unknown UserPresence type: ${type}`);
+    }
   }
 
   sendChatMessage(message, channelId) {
@@ -500,9 +556,15 @@ class StreamerBotClient {
       'JoystickTV_Follow',
       'JoystickTV_StreamStarted',
       'JoystickTV_StreamEnded',
+      'JoystickTV_StreamResuming',
       'JoystickTV_Subscribe',
       'JoystickTV_GiftedSubs',
-      'JoystickTV_DropIn'
+      'JoystickTV_DropIn',
+      'JoystickTV_DeviceConnected',
+      'JoystickTV_TipGoalMet',
+      'JoystickTV_SubscriberOnlyStarted',
+      'JoystickTV_UserEntered',
+      'JoystickTV_UserLeft'
     ];
 
     const missingActions = requiredActions.filter(
@@ -929,6 +991,17 @@ app.post('/api/test/gifted-subs', (req, res) => {
   res.json({ success: true, event: 'JoystickTV_GiftedSubs', args });
 });
 
+app.post('/api/test/stream-resuming', (req, res) => {
+  const args = {
+    timestamp: new Date().toISOString(),
+    platform: 'joystick_test'
+  };
+
+  streamerBotClient.triggerEvent('JoystickTV_StreamResuming', args);
+  logger.info('Test trigger: StreamResuming');
+  res.json({ success: true, event: 'JoystickTV_StreamResuming', args });
+});
+
 app.post('/api/test/drop-in', (req, res) => {
   const { streamer, viewers } = req.body;
   
@@ -941,6 +1014,72 @@ app.post('/api/test/drop-in', (req, res) => {
   streamerBotClient.triggerEvent('JoystickTV_DropIn', args);
   logger.info(`Test trigger: ${args.streamer} dropped in with ${args.viewers} viewers`);
   res.json({ success: true, event: 'JoystickTV_DropIn', args });
+});
+
+// Helper: get a valid access token for the first connected channel, refreshing if needed
+async function getAccessToken() {
+  const channelId = Object.keys(tokenManager.tokens)[0];
+  if (!channelId) {
+    throw new Error('No authorized channels. Complete OAuth setup at /setup');
+  }
+
+  if (tokenManager.isTokenExpired(channelId)) {
+    logger.info(`Token expired for channel ${channelId}, refreshing...`);
+    const refreshed = await tokenManager.refreshToken(channelId);
+    if (!refreshed) {
+      throw new Error('Failed to refresh access token');
+    }
+  }
+
+  return tokenManager.getToken(channelId).accessToken;
+}
+
+app.get('/api/stream-settings', async (req, res) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await axios.get(`${config.joystick.apiHost}/api/users/stream-settings`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    res.json(response.data);
+  } catch (error) {
+    logger.error(`Failed to fetch stream settings: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/stream-settings', async (req, res) => {
+  const { stream_title, chat_welcome_message, banned_chat_words } = req.body;
+
+  if (stream_title === undefined && chat_welcome_message === undefined && banned_chat_words === undefined) {
+    return res.status(400).json({ error: 'At least one field required: stream_title, chat_welcome_message, banned_chat_words' });
+  }
+
+  const streamerPayload = {};
+  if (stream_title !== undefined) streamerPayload.stream_title = stream_title;
+  if (chat_welcome_message !== undefined) streamerPayload.chat_welcome_message = chat_welcome_message;
+  if (banned_chat_words !== undefined) streamerPayload.banned_chat_words = banned_chat_words;
+
+  try {
+    const accessToken = await getAccessToken();
+    const response = await axios.patch(
+      `${config.joystick.apiHost}/api/users/stream-settings`,
+      { streamer: streamerPayload },
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    logger.info(`Stream settings updated: ${JSON.stringify(streamerPayload)}`);
+    res.json(response.data);
+  } catch (error) {
+    logger.error(`Failed to update stream settings: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 function start() {
@@ -992,4 +1131,3 @@ process.on('SIGINT', () => {
 });
 
 start();
-
