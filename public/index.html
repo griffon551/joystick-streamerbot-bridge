@@ -468,7 +468,23 @@
                 <div class="test-card">
                     <h3>📡 Stream Events</h3>
                     <button onclick="testStreamStarted()" style="margin-bottom: 10px;">Test Stream Started</button>
-                    <button onclick="testStreamEnded()" class="secondary">Test Stream Ended</button>
+                    <button onclick="testStreamEnded()" class="secondary" style="margin-bottom: 10px;">Test Stream Ended</button>
+                    <button onclick="testStreamResuming()" class="secondary">Test Stream Resuming</button>
+                </div>
+
+                <!-- Stream Title -->
+                <div class="test-card">
+                    <h3>🎬 Stream Title</h3>
+                    <div class="form-group">
+                        <label>Current Title</label>
+                        <input type="text" id="current-title" placeholder="Click fetch to load..." readonly style="background:#f3f4f6; cursor:default;">
+                    </div>
+                    <button onclick="fetchStreamTitle()" class="secondary" style="margin-bottom: 10px;">Fetch Current Title</button>
+                    <div class="form-group">
+                        <label>New Title</label>
+                        <input type="text" id="new-title" placeholder="Enter new stream title">
+                    </div>
+                    <button onclick="updateStreamTitle()">Update Title</button>
                 </div>
             </div>
         </div>
@@ -497,7 +513,10 @@
                     joystickDot.className = 'status-dot disconnected';
                     joystickText.textContent = 'Disconnected';
                 }
-                joystickChannel.textContent = `Channel: ${data.joystick.channelId || 'N/A'}`;
+                const channels = data.joystick.connectedChannels;
+                joystickChannel.textContent = channels && channels.length > 0
+                    ? `Channel: ${channels.join(', ')}`
+                    : 'No channels connected';
 
                 // Streamer.bot status
                 const sbDot = document.getElementById('streamerbot-status');
@@ -728,6 +747,62 @@
             }
         }
 
+        async function testStreamResuming() {
+            try {
+                const response = await fetch('/api/test/stream-resuming', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                if (response.ok) {
+                    showAlert('✓ Triggered stream resuming event', 'success');
+                }
+            } catch (error) {
+                showAlert('Failed to trigger event', 'error');
+            }
+        }
+
+        async function fetchStreamTitle() {
+            try {
+                const response = await fetch('/api/stream-settings');
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('current-title').value = data.stream_title || '(no title set)';
+                    showAlert('✓ Stream settings fetched', 'success');
+                } else {
+                    const err = await response.json();
+                    showAlert(`Failed to fetch: ${err.error}`, 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to fetch stream settings', 'error');
+            }
+        }
+
+        async function updateStreamTitle() {
+            const title = document.getElementById('new-title').value.trim();
+            if (!title) {
+                showAlert('Please enter a new title', 'error');
+                return;
+            }
+            try {
+                const response = await fetch('/api/stream-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ stream_title: title })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('current-title').value = data.stream_title;
+                    document.getElementById('new-title').value = '';
+                    showAlert(`✓ Stream title updated to: ${data.stream_title}`, 'success');
+                } else {
+                    const err = await response.json();
+                    showAlert(`Failed to update: ${err.error}`, 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to update stream title', 'error');
+            }
+        }
+
         async function testDropIn() {
             const streamer = document.getElementById('dropin-streamer').value;
             const viewers = parseInt(document.getElementById('dropin-viewers').value);
@@ -749,4 +824,3 @@
     </script>
 </body>
 </html>
-
