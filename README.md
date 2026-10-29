@@ -9,7 +9,8 @@ Docker-based integration that connects Joystick.TV to Streamer.bot, allowing you
 ✅ Wheel spin events with user, amount, and prize  
 ✅ Follow notifications with username  
 ✅ Stream start/end events  
-✅ Subscription events with username and tier  
+✅ Subscription and gifted subscription events  
+✅ Stream drop-in events  
 ✅ Send chat messages to Joystick.TV  
 ✅ Automatically pulls from GitHub - no manual file management!
 
@@ -18,16 +19,16 @@ Docker-based integration that connects Joystick.TV to Streamer.bot, allowing you
 - Docker and Docker Compose installed
 - Dockge (for easy management)
 - Streamer.bot running with WebSocket server enabled
-- Joystick.TV account with API access
+- Joystick.TV account with API/Developer access (Client ID and Client Secret)
 
 ## Quick Start with Dockge
 
-### Step 1: Get Your Joystick.TV Credentials
+### Step 1: Get Your Joystick.TV OAuth Credentials
 
 1. Log into your Joystick.TV account
-2. Go to Settings → Developer/API section
-3. Generate an API token
-4. Note your Channel ID
+2. Go to **Settings → Developer / API** section
+3. Create an OAuth application (or find your existing one)
+4. Note your **Client ID** and **Client Secret**
 
 ### Step 2: Enable Streamer.bot WebSocket Server
 
@@ -40,41 +41,35 @@ Docker-based integration that connects Joystick.TV to Streamer.bot, allowing you
 
 1. In Dockge, click "**+ Compose**"
 2. Name your stack: `joystick-streamerbot`
-3. Copy the `compose.yaml` content into the editor
-4. **Important**: Update the GitHub URL in the compose file:
-   - Change `YOUR_USERNAME` to the actual GitHub username/organization
-   - Example: `https://github.com/streamer-tools/joystick-streamerbot-bridge.git#main`
-5. Click "**Save**"
+3. Copy the contents of `dockge example yaml` into the editor
+4. Click "**Save**"
 
 ### Step 4: Configure Environment Variables
 
-1. In Dockge, go to your stack's environment variables section
-2. Add the following variables:
+Update the following variables in the compose file:
 
 ```env
-JOYSTICK_AUTH_TOKEN=your_actual_token_here
-JOYSTICK_CHANNEL_ID=your_channel_id_here
-STREAMERBOT_HOST=host.docker.internal
+JOYSTICK_CLIENT_ID=your_client_id_here
+JOYSTICK_CLIENT_SECRET=your_client_secret_here
+JOYSTICK_REDIRECT_URI=http://[lan ip of this machine]:3000/oauth/callback
+STREAMERBOT_HOST=your_streamerbot_machine_ip
 STREAMERBOT_PORT=8080
 ```
 
-**Important**: If Streamer.bot is running on:
+**STREAMERBOT_HOST notes:**
 - **Same machine as Docker**: Use `host.docker.internal`
-- **Different machine**: Use that machine's IP address (e.g., `192.168.1.100`)
+- **Different machine on LAN**: Use that machine's IP address (e.g., `192.168.1.100`)
 
-Or create a `.env` file in the stack directory with the same variables.
+### Step 5: Start the Stack & Complete OAuth
 
-### Step 5: Start the Stack
-
-1. In Dockge, click "**Start**" or "**Build & Start**" on your stack
-2. Dockge will automatically:
-   - Clone the repository from GitHub
-   - Build the Docker image
-   - Start the container
-3. Monitor the logs to ensure connection is successful
-4. You should see:
-   - "Connected to Joystick.TV"
-   - "Connected to Streamer.bot"
+1. In Dockge, click "**Build & Start**"
+2. Once running, open `http://[your machine ip]:3000/setup` in your browser
+3. Click **Authorize Bot on Joystick.TV** and log in
+4. After approving, you'll be redirected back and the bridge will connect automatically
+5. Monitor the Dockge logs — you should see:
+   - `Connected to Joystick.TV`
+   - `Successfully subscribed to GatewayChannel`
+   - `Connected to Streamer.bot`
 
 ### Updating to Latest Version
 
@@ -90,103 +85,133 @@ No need to manually update files!
 
 ### Create Actions for Each Event
 
-In Streamer.bot, create actions to respond to these events:
+In Streamer.bot, create actions with these **exact** names:
 
 1. **JoystickTV_ChatMessage**
-   - Variables: `user`, `message`, `userId`, `platform`
+   - Variables: `user`, `message`, `userId`, `messageId`, `channelId`, `platform`
 
 2. **JoystickTV_Tip**
-   - Variables: `user`, `amount`, `menuItem`, `userId`, `platform`
+   - Variables: `user`, `amount`, `menuItem`, `channelId`, `platform`
 
 3. **JoystickTV_WheelSpin**
-   - Variables: `user`, `amount`, `prize`, `userId`, `platform`
+   - Variables: `user`, `amount`, `prize`, `channelId`, `platform`
 
 4. **JoystickTV_Follow**
-   - Variables: `user`, `userId`, `platform`
+   - Variables: `user`, `channelId`, `platform`
 
 5. **JoystickTV_StreamStarted**
-   - Variables: `timestamp`, `platform`
+   - Variables: `timestamp`, `channelId`, `platform`
 
 6. **JoystickTV_StreamEnded**
-   - Variables: `timestamp`, `duration`, `platform`
+   - Variables: `timestamp`, `channelId`, `platform`
 
 7. **JoystickTV_Subscribe**
-   - Variables: `user`, `userId`, `tier`, `platform`
+   - Variables: `user`, `tier`, `giftCount`, `channelId`, `platform`
+
+8. **JoystickTV_GiftedSubs**
+   - Variables: `user`, `tier`, `giftCount`, `channelId`, `platform`
+
+9. **JoystickTV_DropIn**
+   - Variables: `streamer`, `viewers`, `channelId`, `platform`
+
+10. **JoystickTV_StreamResuming**
+    - Variables: `timestamp`, `channelId`, `platform`
+
+11. **JoystickTV_DeviceConnected**
+    - Variables: `timestamp`, `channelId`, `platform`
+
+12. **JoystickTV_TipGoalMet**
+    - Variables: `user`, `amount`, `goalName`, `channelId`, `platform`
+    - Note: Field mapping may be refined once a live event is observed — raw metadata is logged at INFO level
+
+13. **JoystickTV_SubscriberOnlyStarted**
+    - Variables: `timestamp`, `channelId`, `platform`
+    - Note: Raw metadata is logged at INFO level for future refinement
+
+14. **JoystickTV_UserEntered**
+    - Variables: `user`, `channelId`, `platform`
+
+15. **JoystickTV_UserLeft**
+    - Variables: `user`, `channelId`, `platform`
 
 ### Example Action Setup
 
 1. In Streamer.bot, go to **Actions**
-2. Create a new action: "Joystick Tip Alert"
-3. Set the action name to exactly: `JoystickTV_Tip`
-4. Add sub-actions (e.g., Play Sound, Show OBS Source, Send TTS)
-5. Use variables like `%user%`, `%amount%`, `%menuItem%` in your sub-actions
+2. Create a new action named exactly `JoystickTV_Tip`
+3. Add sub-actions (e.g., Play Sound, Show OBS Source, Send TTS)
+4. Use variables like `%user%`, `%amount%`, `%menuItem%` in your sub-actions
 
-### Sending Chat Messages
+### Sending Chat Messages from Streamer.bot
 
-To send a message to Joystick.TV from Streamer.bot:
-
-**Method 1: HTTP API** (Recommended)
+**Method 1: HTTP API** (Recommended)  
 Use the "HTTP Request" sub-action in Streamer.bot:
 - URL: `http://localhost:3000/chat/send`
-- Method: POST
+- Method: `POST`
 - Body: `{"message": "Your message here"}`
 - Headers: `Content-Type: application/json`
 
-**Method 2: Custom Event**
+**Method 2: Custom Event**  
 Trigger a custom event named `JoystickTV_SendMessage` with a `message` argument.
+
+### Sending Whispers from Streamer.bot
+
+> **Requires the `SendWhisper` permission** on your Joystick.TV bot application. This permission cannot be added after the bot is created — if it's missing, you'll need to recreate the bot application with it enabled and redo the OAuth setup.
+
+**Method 1: HTTP API** (Recommended)  
+Use the "HTTP Request" sub-action in Streamer.bot:
+- URL: `http://localhost:3000/chat/whisper`
+- Method: `POST`
+- Body: `{"username": "someuser", "message": "Your private message"}`
+- Headers: `Content-Type: application/json`
+
+**Method 2: Custom Event**  
+Trigger a custom event named `JoystickTV_SendWhisper` with `username` and `message` arguments.
 
 ## API Endpoints
 
-The bridge provides these HTTP endpoints:
-
-- `GET /health` - Health check and connection status
-- `GET /status` - Detailed status of connections
-- `POST /chat/send` - Send a chat message
+- `GET /health` — Health check and uptime
+- `GET /status` — Detailed connection status
+- `GET /setup` — OAuth authorization page
+- `GET /oauth/callback` — OAuth redirect handler (set this as your redirect URI)
+- `POST /chat/send` — Send a chat message to Joystick.TV
   ```json
-  {
-    "message": "Hello from Streamer.bot!"
-  }
+  { "message": "Hello from Streamer.bot!" }
   ```
+- `POST /chat/whisper` — Send a private whisper to a specific user (requires `SendWhisper` permission)
+  ```json
+  { "username": "someuser", "message": "this is a secret" }
+  ```
+- `GET /api/stream-settings` — Fetch current stream settings (title, welcome message, etc.)
+- `POST /api/stream-settings` — Update stream settings (any combination of fields)
+  ```json
+  { "stream_title": "My new title" }
+  { "stream_title": "New title", "chat_welcome_message": "Welcome!" }
+  { "banned_chat_words": ["word1", "word2"] }
+  ```
+
+Both stream settings endpoints require the `ManageStreamerSettings` permission on your Joystick.TV bot application. The bridge uses the stored OAuth token and refreshes it automatically if expired.
 
 ## Troubleshooting
 
 ### Bridge won't connect to Joystick.TV
-- Verify your `JOYSTICK_AUTH_TOKEN` is correct
-- Check your `JOYSTICK_CHANNEL_ID` is correct
+- Make sure you've completed the OAuth flow at `/setup`
+- Verify `JOYSTICK_CLIENT_ID` and `JOYSTICK_CLIENT_SECRET` are correct
+- Check that `JOYSTICK_REDIRECT_URI` matches exactly what's registered in your Joystick.TV developer settings
 - Review logs in Dockge for error messages
 
 ### Bridge won't connect to Streamer.bot
-- Ensure Streamer.bot WebSocket server is enabled
+- Ensure the Streamer.bot WebSocket server is enabled
 - Verify the port matches (default: 8080)
-- Check `STREAMERBOT_HOST`:
-  - Local: Should be `host.docker.internal`
-  - Remote: Should be the machine's IP address
+- Check `STREAMERBOT_HOST` — use `host.docker.internal` if on the same machine, or the LAN IP if remote
 - Make sure no firewall is blocking the connection
 
 ### Events not triggering in Streamer.bot
-- Ensure action names match exactly (case-sensitive)
-- Check that the action names are: `JoystickTV_ChatMessage`, `JoystickTV_Tip`, etc.
-- Verify WebSocket connection in Streamer.bot logs
+- Action names are **case-sensitive** — they must match exactly
+- Use the control panel at `http://[your machine ip]:3000` to test triggers without a live stream
+- Check the **Required Actions Status** panel to see which actions Streamer.bot has detected
 
 ### Viewing Logs
-In Dockge, click on your stack and view the **Logs** tab to see real-time connection status and events.
-
-## Upgrading
-
-To update to the latest version from GitHub:
-
-1. In Dockge, stop the stack
-2. Click "**Rebuild**" or "**Build & Start**"
-3. Dockge will pull the latest code from GitHub and rebuild
-
-Your environment variables and data will be preserved!
-
-## Support
-
-For issues related to:
-- **Joystick.TV API**: Check Joystick.TV documentation
-- **Streamer.bot**: Check Streamer.bot documentation/Discord
-- **This bridge**: Check container logs and verify configuration
+In Dockge, click on your stack and view the **Logs** tab for real-time connection status and event activity. Set `LOG_LEVEL=debug` in your environment variables for verbose output.
 
 ## License
 
