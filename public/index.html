@@ -486,6 +486,21 @@
                     </div>
                     <button onclick="updateStreamTitle()">Update Title</button>
                 </div>
+
+                <!-- Whisper -->
+                <div class="test-card">
+                    <h3>🤫 Send Whisper</h3>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="whisper-username" placeholder="Recipient username">
+                    </div>
+                    <div class="form-group">
+                        <label>Message</label>
+                        <input type="text" id="whisper-message" placeholder="Whisper text">
+                    </div>
+                    <button onclick="sendWhisper()">Send Whisper</button>
+                    <small style="display:block; margin-top:8px; color:#6b7280;">Requires the SendWhisper permission on your bot application.</small>
+                </div>
             </div>
         </div>
     </div>
@@ -800,6 +815,37 @@
                 }
             } catch (error) {
                 showAlert('Failed to update stream title', 'error');
+            }
+        }
+
+        async function sendWhisper() {
+            const username = document.getElementById('whisper-username').value.trim();
+            const message = document.getElementById('whisper-message').value.trim();
+
+            if (!username) {
+                showAlert('Please enter a username', 'error');
+                return;
+            }
+            if (!message) {
+                showAlert('Please enter a message', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/chat/whisper', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, message })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    showAlert(`✓ Whisper sent to ${username}`, 'success');
+                    document.getElementById('whisper-message').value = '';
+                } else {
+                    showAlert(`Failed to send whisper: ${data.error || 'Unknown error'}`, 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to send whisper', 'error');
             }
         }
 
