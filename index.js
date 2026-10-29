@@ -449,6 +449,48 @@ class JoystickClient {
     }
   }
 
+  sendWhisper(username, message, channelId) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      logger.error('Cannot send whisper: Not connected');
+      return false;
+    }
+
+    if (!channelId) {
+      logger.error('Cannot send whisper: No channelId specified');
+      return false;
+    }
+
+    if (!username) {
+      logger.error('Cannot send whisper: No username specified');
+      return false;
+    }
+
+    // Action Cable message format for sending whispers
+    const payload = {
+      command: 'message',
+      identifier: JSON.stringify({
+        channel: 'GatewayChannel'
+      }),
+      data: JSON.stringify({
+        action: 'send_whisper',
+        username: username,
+        text: message,
+        channelId: channelId
+      })
+    };
+
+    logger.debug(`Sending whisper payload: ${JSON.stringify(payload)}`);
+
+    try {
+      this.ws.send(JSON.stringify(payload));
+      logger.info(`Sent whisper to ${username} on ${channelId}: ${message}`);
+      return true;
+    } catch (error) {
+      logger.error(`Error sending whisper: ${error.message}`);
+      return false;
+    }
+  }
+
   scheduleReconnect() {
     logger.info(`Reconnecting in ${this.currentReconnectDelay / 1000}s...`);
     setTimeout(() => this.connect(), this.currentReconnectDelay);
@@ -620,6 +662,17 @@ class StreamerBotClient {
       const chatMessage = message.data.message;
       if (chatMessage) {
         joystickClient.sendChatMessage(chatMessage);
+      }
+    }
+
+    if (message.event?.type === 'Custom' && message.data?.name === 'JoystickTV_SendWhisper') {
+      const whisperUsername = message.data.username;
+      const whisperMessage = message.data.message;
+      if (whisperUsername && whisperMessage) {
+        const channelId = Array.from(joystickClient.connectedChannels.keys())[0];
+        joystickClient.sendWhisper(whisperUsername, whisperMessage, channelId);
+      } else {
+        logger.error('JoystickTV_SendWhisper requires both username and message');
       }
     }
   }
@@ -835,6 +888,31 @@ app.post('/chat/send', (req, res) => {
 
   const success = joystickClient.sendChatMessage(message, targetChannel);
   res.json({ success, channelId: targetChannel });
+});
+
+app.post('/chat/whisper', (req, res) => {
+  const { username, message, channelId } = req.body;
+
+  if (!username) {
+    return res.status(400).json({ error: 'Username is required' });
+  }
+
+  if (!message) {
+    return res.status(400).json({ error: 'Message is required' });
+  }
+
+  let targetChannel = channelId;
+  if (!targetChannel && joystickClient.connectedChannels) {
+    const channels = Array.from(joystickClient.connectedChannels.keys());
+    if (channels.length > 0) {
+      targetChannel = channels[0];
+    } else {
+      return res.status(400).json({ error: 'No connected channels' });
+    }
+  }
+
+  const success = joystickClient.sendWhisper(username, message, targetChannel);
+  res.json({ success, channelId: targetChannel, username });
 });
 
 app.get('/status', (req, res) => {
