@@ -122,6 +122,14 @@ const logger = {
 };
 
 // Joystick.TV WebSocket Client
+// Stores last 3 raw v2 messages per event type for debug panel
+const recentEvents = {};
+function recordRawEvent(type, msg) {
+  if (!recentEvents[type]) recentEvents[type] = [];
+  recentEvents[type].unshift({ receivedAt: new Date().toISOString(), payload: msg });
+  if (recentEvents[type].length > 3) recentEvents[type].length = 3;
+}
+
 class JoystickClient {
   constructor() {
     this.ws = null;
@@ -156,16 +164,18 @@ class JoystickClient {
     this.ws.on('open', () => {
       logger.info('WebSocket connected to Joystick.TV');
       this.currentReconnectDelay = this.reconnectDelay;
-      
+
+      // Subscribe using v2 event envelope for structured data payloads
       const subscribeMessage = {
         command: 'subscribe',
         identifier: JSON.stringify({
-          channel: 'GatewayChannel'
+          channel: 'GatewayChannel',
+          event_version: 'v2'
         })
       };
-      
+
       this.ws.send(JSON.stringify(subscribeMessage));
-      logger.info('Sent subscription request for GatewayChannel');
+      logger.info('Sent subscription request for GatewayChannel (v2)');
     });
 
     this.ws.on('message', (data) => {
@@ -216,24 +226,207 @@ class JoystickClient {
 
     if (message.message) {
       const data = message.message;
-      const channelId = data.channelId;
-      
+
+      // v2 envelope: { v: 2, type: "new_message", channel_id: "...", occurred_at: "...", data: {} }
+      // v1 envelope: { event: "ChatMessage", channelId: "...", createdAt: "...", ... }
+      const isV2 = data.v === 2;
+
+      const channelId = isV2 ? data.channel_id : data.channelId;
+
       if (channelId && !this.connectedChannels.has(channelId)) {
         this.connectedChannels.set(channelId, true);
         logger.info(`Now receiving events from channel: ${channelId}`);
       }
 
-      const event = data.event;
-
-      if (event === 'ChatMessage') {
-        this.handleChatMessage(data);
-      } else if (event === 'StreamEvent') {
-        this.handleStreamEvent(data);
-      } else if (event === 'UserPresence') {
-        this.handleUserPresence(data);
+      if (isV2) {
+        this.handleV2Event(data);
       } else {
-        logger.debug(`Unknown event: ${event}`);
+        // Legacy v1 path
+        const event = data.event;
+        if (event === 'ChatMessage') {
+          this.handleChatMessage(data);
+        } else if (event === 'StreamEvent') {
+          this.handleStreamEvent(data);
+        } else if (event === 'UserPresence') {
+          this.handleUserPresence(data);
+        } else {
+          logger.debug(`Unknown v1 event: ${event}`);
+        }
       }
+    }
+  }
+
+  handleV2Event(msg) {
+    const type = msg.type;
+    const channelId = msg.channel_id;
+    const occurredAt = msg.occurred_at;
+    const data = msg.data || {};
+
+    recordRawEvent(type, msg);
+
+    switch (type) {
+      case 'new_message': {
+        const badges = data.author?.badges || {};
+        const args = {
+          user: data.author?.username || 'Unknown',
+          message: data.text || '',
+          userId: data.author?.username || '',
+          messageId: msg.id,
+          channelId,
+          isMod: badges.mod || false,
+          isSubscriber: badges.subscriber || false,
+          platform: 'joystick'
+        };
+        logger.info(`Chat from ${args.user}: ${args.message}`);
+        streamerBotClient.triggerEvent('JoystickTV_ChatMessage', args);
+        break;
+      }
+
+      case 'tipped': {
+        const args = {
+          user: data.who || 'Unknown',
+          amount: data.how_much || 0,
+          menuItem: data.tip_menu_item || '',
+          channelId,
+          platform: 'joystick'
+        };
+        logger.info(`Tip from ${args.user}: ${args.amount} tokens - ${args.menuItem}`);
+        streamerBotClient.triggerEvent('JoystickTV_Tip', args);
+        break;
+      }
+
+      case 'wheel_spin_claimed': {
+        const args = {
+          user: data.who || 'Unknown',
+          amount: data.how_much || 0,
+          prize: data.prize || '',
+          channelId,
+          platform: 'joystick'
+        };
+        logger.info(`Wheel spin by ${args.user}: won ${args.prize}`);
+        streamerBotClient.triggerEvent('JoystickTV_WheelSpin', args);
+        break;
+      }
+
+      case 'followed': {
+        const args = {
+          user: data.who || 'Unknown',
+          channelId,
+          platform: 'joystick'
+        };
+        logger.info(`New follower: ${args.user}`);
+        streamerBotClient.triggerEvent('JoystickTV_Follow', args);
+        break;
+      }
+
+      case 'started':
+      case 'stream_started': {
+        const args = { user: data.who || '', timestamp: occurredAt, channelId, platform: 'joystick' };
+        logger.info(`Stream started (${args.user})`);
+        streamerBotClient.triggerEvent('JoystickTV_StreamStarted', args);
+        break;
+      }
+
+      case 'ended':
+      case 'stream_ended':
+      case 'stream_ending': {
+        const args = { user: data.who || '', timestamp: occurredAt, channelId, platform: 'joystick' };
+        logger.info('Stream ended');
+        streamerBotClient.triggerEvent('JoystickTV_StreamEnded', args);
+        break;
+      }
+
+      case 'resuming':
+      case 'stream_resuming': {
+        const args = { user: data.who || '', timestamp: occurredAt, channelId, platform: 'joystick' };
+        logger.info('Stream resuming soon');
+        streamerBotClient.triggerEvent('JoystickTV_StreamResuming', args);
+        break;
+      }
+
+      case 'subscribed': {
+        const args = {
+          user: data.who || 'Unknown',
+          tier: data.tier || '',
+          giftCount: data.count || 1,
+          channelId,
+          platform: 'joystick'
+        };
+        logger.info(`New subscriber: ${args.user}`);
+        streamerBotClient.triggerEvent('JoystickTV_Subscribe', args);
+        break;
+      }
+
+      case 'gifted_subscriptions': {
+        const args = {
+          user: data.who || 'Unknown',
+          tier: data.tier || '',
+          giftCount: data.count || 1,
+          channelId,
+          platform: 'joystick'
+        };
+        logger.info(`${args.user} gifted ${args.giftCount} subscription(s)`);
+        streamerBotClient.triggerEvent('JoystickTV_GiftedSubs', args);
+        break;
+      }
+
+      case 'dropped_in':
+      case 'stream_dropped_in': {
+        const args = {
+          streamer: data.who || 'Unknown',
+          viewers: data.number_of_viewers || data.viewer_count || data.viewers || 0,
+          channelId,
+          platform: 'joystick'
+        };
+        logger.info(`${args.streamer} dropped in with ${args.viewers} viewers`);
+        streamerBotClient.triggerEvent('JoystickTV_DropIn', args);
+        break;
+      }
+
+      case 'device_connected': {
+        const args = { timestamp: occurredAt, channelId, platform: 'joystick' };
+        logger.info('Device connected');
+        streamerBotClient.triggerEvent('JoystickTV_DeviceConnected', args);
+        break;
+      }
+
+      case 'tip_goal_met': {
+        const args = {
+          user: data.who || 'Unknown',
+          amount: data.how_much || 0,
+          goalName: data.goal_name || data.tip_menu_item || '',
+          channelId,
+          platform: 'joystick'
+        };
+        logger.info(`Tip goal met! Raw data: ${JSON.stringify(data)}`);
+        streamerBotClient.triggerEvent('JoystickTV_TipGoalMet', args);
+        break;
+      }
+
+      case 'subscriber_only_started': {
+        const args = { timestamp: occurredAt, channelId, platform: 'joystick' };
+        logger.info(`Subscriber only mode started. Raw data: ${JSON.stringify(data)}`);
+        streamerBotClient.triggerEvent('JoystickTV_SubscriberOnlyStarted', args);
+        break;
+      }
+
+      case 'enter_stream': {
+        const args = { user: data.username || 'Unknown', channelId, platform: 'joystick' };
+        logger.debug(`User entered: ${args.user}`);
+        streamerBotClient.triggerEvent('JoystickTV_UserEntered', args);
+        break;
+      }
+
+      case 'leave_stream': {
+        const args = { user: data.username || 'Unknown', channelId, platform: 'joystick' };
+        logger.debug(`User left: ${args.user}`);
+        streamerBotClient.triggerEvent('JoystickTV_UserLeft', args);
+        break;
+      }
+
+      default:
+        logger.debug(`Unhandled v2 event type: ${type}`);
+        logger.debug(`Data: ${JSON.stringify(msg)}`);
     }
   }
 
@@ -425,20 +618,22 @@ class JoystickClient {
     }
 
     // Action Cable message format for sending messages
+    // identifier must match the subscribe identifier exactly
     const payload = {
       command: 'message',
       identifier: JSON.stringify({
-        channel: 'GatewayChannel'
+        channel: 'GatewayChannel',
+        event_version: 'v2'
       }),
       data: JSON.stringify({
         action: 'send_message',
         text: message,
-        channelId: channelId
+        channel_id: channelId
       })
     };
 
     logger.debug(`Sending chat message payload: ${JSON.stringify(payload)}`);
-    
+
     try {
       this.ws.send(JSON.stringify(payload));
       logger.info(`Sent chat message to ${channelId}: ${message}`);
@@ -466,16 +661,18 @@ class JoystickClient {
     }
 
     // Action Cable message format for sending whispers
+    // identifier must match the subscribe identifier exactly
     const payload = {
       command: 'message',
       identifier: JSON.stringify({
-        channel: 'GatewayChannel'
+        channel: 'GatewayChannel',
+        event_version: 'v2'
       }),
       data: JSON.stringify({
         action: 'send_whisper',
         username: username,
         text: message,
-        channelId: channelId
+        channel_id: channelId
       })
     };
 
@@ -569,15 +766,20 @@ class StreamerBotClient {
     
     this.send(subscribeMessage);
     this.getActions();
-    
-    setTimeout(() => {
-      const authMessage = {
-        request: 'Authenticate',
-        id: 'auth-' + Date.now()
-      };
-      this.send(authMessage);
-      logger.debug('Sent authentication request to Streamer.bot');
-    }, 500);
+
+    // Only attempt authentication if credentials are configured
+    const sbPassword = process.env.STREAMERBOT_PASSWORD;
+    if (sbPassword) {
+      setTimeout(() => {
+        const authMessage = {
+          request: 'Authenticate',
+          password: sbPassword,
+          id: 'auth-' + Date.now()
+        };
+        this.send(authMessage);
+        logger.debug('Sent authentication request to Streamer.bot');
+      }, 500);
+    }
   }
 
   getActions() {
@@ -809,13 +1011,13 @@ app.get('/oauth/callback', async (req, res) => {
 
     if (!channelId) {
       try {
-        const userResponse = await axios.get(`${config.joystick.apiHost}/api/users/stream-settings`, {
+        const userResponse = await axios.get('https://api.joystick.tv/api/v1/me/stream', {
           headers: {
             'Authorization': `Bearer ${access_token}`,
             'Content-Type': 'application/json'
           }
         });
-        channelId = userResponse.data.username || `user_${Date.now()}`;
+        channelId = userResponse.data.username || userResponse.data.channel_id || `user_${Date.now()}`;
         logger.debug(`Got channel ID from API: ${channelId}`);
       } catch (apiError) {
         logger.warn(`Could not fetch user info: ${apiError.message}`);
@@ -1112,10 +1314,14 @@ async function getAccessToken() {
   return tokenManager.getToken(channelId).accessToken;
 }
 
+app.get('/api/recent-events', (req, res) => {
+  res.json(recentEvents);
+});
+
 app.get('/api/stream-settings', async (req, res) => {
   try {
     const accessToken = await getAccessToken();
-    const response = await axios.get(`${config.joystick.apiHost}/api/users/stream-settings`, {
+    const response = await axios.get('https://api.joystick.tv/api/v1/me/stream', {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
@@ -1135,16 +1341,16 @@ app.post('/api/stream-settings', async (req, res) => {
     return res.status(400).json({ error: 'At least one field required: stream_title, chat_welcome_message, banned_chat_words' });
   }
 
-  const streamerPayload = {};
-  if (stream_title !== undefined) streamerPayload.stream_title = stream_title;
-  if (chat_welcome_message !== undefined) streamerPayload.chat_welcome_message = chat_welcome_message;
-  if (banned_chat_words !== undefined) streamerPayload.banned_chat_words = banned_chat_words;
+  const updatePayload = {};
+  if (stream_title !== undefined) updatePayload.stream_title = stream_title;
+  if (chat_welcome_message !== undefined) updatePayload.chat_welcome_message = chat_welcome_message;
+  if (banned_chat_words !== undefined) updatePayload.banned_chat_words = banned_chat_words;
 
   try {
     const accessToken = await getAccessToken();
-    const response = await axios.patch(
-      `${config.joystick.apiHost}/api/users/stream-settings`,
-      { streamer: streamerPayload },
+    const response = await axios.put(
+      'https://api.joystick.tv/api/v1/me/stream',
+      updatePayload,
       {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -1152,7 +1358,7 @@ app.post('/api/stream-settings', async (req, res) => {
         }
       }
     );
-    logger.info(`Stream settings updated: ${JSON.stringify(streamerPayload)}`);
+    logger.info(`Stream settings updated: ${JSON.stringify(updatePayload)}`);
     res.json(response.data);
   } catch (error) {
     logger.error(`Failed to update stream settings: ${error.message}`);
