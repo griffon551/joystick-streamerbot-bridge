@@ -505,6 +505,28 @@
         </div>
     </div>
 
+    <!-- Raw Event Debug Panel -->
+    <div style="max-width:1200px; margin:24px auto; padding:0 20px 40px;">
+        <details id="debug-panel">
+            <summary style="cursor:pointer; font-size:1.1rem; font-weight:600; padding:14px 18px; background:#1f2937; color:#f9fafb; border-radius:8px; list-style:none; display:flex; align-items:center; gap:8px; user-select:none;">
+                <span id="debug-toggle-icon">▶</span> Raw Event Debug Log
+                <span style="margin-left:auto; font-size:0.8rem; font-weight:400; color:#9ca3af;">Last 3 raw payloads per event type</span>
+                <button onclick="event.preventDefault(); loadDebugEvents();" style="margin-left:12px; padding:4px 10px; font-size:0.75rem; background:#374151; color:#d1d5db; border:none; border-radius:4px; cursor:pointer;">↻ Refresh</button>
+            </summary>
+            <div style="background:#111827; border-radius:0 0 8px 8px; padding:16px;">
+                <div style="display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+                    <input id="debug-filter" type="text" placeholder="Filter by event type..." oninput="renderDebugEvents()" style="flex:1; min-width:180px; padding:6px 10px; background:#1f2937; border:1px solid #374151; border-radius:6px; color:#f9fafb; font-size:0.85rem;">
+                    <label style="display:flex; align-items:center; gap:6px; color:#9ca3af; font-size:0.85rem; cursor:pointer;">
+                        <input type="checkbox" id="debug-auto-refresh" onchange="toggleDebugAutoRefresh()" style="accent-color:#6366f1;"> Auto-refresh
+                    </label>
+                </div>
+                <div id="debug-event-list" style="display:flex; flex-direction:column; gap:12px;">
+                    <p style="color:#6b7280; font-size:0.9rem; text-align:center; padding:20px 0;">Open panel and click Refresh to load events</p>
+                </div>
+            </div>
+        </details>
+    </div>
+
     <script>
         // Update status on load and every 5 seconds
         updateStatus();
@@ -865,6 +887,69 @@
                 }
             } catch (error) {
                 showAlert('Failed to trigger event', 'error');
+            }
+        }
+        // ── Debug panel ──────────────────────────────────────────────
+        let debugData = {};
+        let debugAutoRefreshTimer = null;
+
+        document.getElementById('debug-panel').addEventListener('toggle', function() {
+            document.getElementById('debug-toggle-icon').textContent = this.open ? '▼' : '▶';
+            if (this.open) loadDebugEvents();
+        });
+
+        async function loadDebugEvents() {
+            try {
+                const res = await fetch('/api/recent-events');
+                debugData = await res.json();
+                renderDebugEvents();
+            } catch (e) {
+                document.getElementById('debug-event-list').innerHTML =
+                    '<p style="color:#ef4444; font-size:0.9rem;">Failed to load events</p>';
+            }
+        }
+
+        function renderDebugEvents() {
+            const filter = (document.getElementById('debug-filter').value || '').toLowerCase();
+            const container = document.getElementById('debug-event-list');
+            const types = Object.keys(debugData).filter(t => !filter || t.includes(filter)).sort();
+
+            if (types.length === 0) {
+                container.innerHTML = '<p style="color:#6b7280; font-size:0.9rem; text-align:center; padding:20px 0;">' +
+                    (Object.keys(debugData).length === 0 ? 'No events recorded yet — events appear here as they arrive.' : 'No events match the filter.') +
+                    '</p>';
+                return;
+            }
+
+            container.innerHTML = types.map(type => {
+                const entries = debugData[type];
+                const rows = entries.map((e, i) => {
+                    const pretty = JSON.stringify(e.payload, null, 2)
+                        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    return `<div style="margin-top:${i > 0 ? '8px' : '0'};">
+                        <div style="font-size:0.75rem; color:#6b7280; margin-bottom:3px;">${e.receivedAt}</div>
+                        <pre style="margin:0; padding:10px 12px; background:#0d1117; border-radius:6px; font-size:0.78rem; color:#c9d1d9; overflow-x:auto; white-space:pre-wrap; word-break:break-all;">${pretty}</pre>
+                    </div>`;
+                }).join('');
+
+                return `<div style="border:1px solid #374151; border-radius:8px; overflow:hidden;">
+                    <div style="padding:8px 14px; background:#1f2937; display:flex; align-items:center; justify-content:space-between;">
+                        <span style="font-weight:600; color:#a5b4fc; font-size:0.9rem;">${type}</span>
+                        <span style="font-size:0.75rem; color:#6b7280;">${entries.length} recent</span>
+                    </div>
+                    <div style="padding:12px 14px;">${rows}</div>
+                </div>`;
+            }).join('');
+        }
+
+        function toggleDebugAutoRefresh() {
+            const enabled = document.getElementById('debug-auto-refresh').checked;
+            if (enabled) {
+                loadDebugEvents();
+                debugAutoRefreshTimer = setInterval(loadDebugEvents, 3000);
+            } else {
+                clearInterval(debugAutoRefreshTimer);
+                debugAutoRefreshTimer = null;
             }
         }
     </script>
